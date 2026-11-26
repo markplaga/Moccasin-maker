@@ -15,6 +15,16 @@ The app is a Progressive Web App: it installs from the browser and works offline
 - **Android (Chrome, Edge, Samsung Internet):** tap **Install app** in the banner, or open the browser menu and choose **Install app** / **Add to Home screen**.
 - **iPhone / iPad (Safari):** tap **Share**, then **Add to Home Screen**. The page shows these steps on iOS.
 
+### Updates
+
+Installed apps update themselves. Nobody has to delete or reinstall the app.
+
+- The app checks for a new version when it opens, when it comes back to the foreground, and every hour. **Check for updates** at the bottom of the page checks right away. The current version is shown next to it.
+- When a new version is ready, a banner offers **Update now** or **Later**. Updating swaps in the new files and removes old cached copies. Measurements, layouts and other saved settings are kept, because they live in the browser's storage and the updater only touches its own `mm-…` caches.
+- The HTML page is always fetched fresh from the network when online, and new versions install with the browser's HTTP cache bypassed, so stale files can't block an update.
+
+**Releasing a version:** run `tools/bump-version.sh 1.9.0 "What changed"` and push to `main`. It sets the same version in `index.html`, `sw.js` and `version.json`.
+
 To publish your own copy: in the repo go to **Settings → Pages**, set **Source** to *Deploy from a branch*, and pick `main` and `/ (root)`.
 
 ## Use it

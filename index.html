@@ -148,6 +148,8 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 .install{max-width:1360px;margin:0 auto 14px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;background:var(--accent-soft);border-radius:var(--r);padding:12px 14px;font-size:14px}
 .install .ios-steps b{font-weight:600}
+.install.update{background:var(--panel);border:1.5px solid var(--accent)}
+.appfoot{max-width:1360px;margin:8px auto 24px;padding:0 4px calc(8px + env(safe-area-inset-bottom, 0px));display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:13px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -163,6 +165,10 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
   </nav>
 </header>
 
+<div class="install update" id="updateBar" role="status" aria-live="polite" hidden>
+  <span id="updateText">A new version of Moccasin Maker is ready. Your measurements and designs are kept.</span>
+  <span class="row"><button class="btn accent" id="updateNow">Update now</button><button class="btn ghost" id="updateLater">Later</button></span>
+</div>
 <div class="install" id="installBar" hidden>
   <span id="installText">Install Moccasin Maker on this device. It opens like an app and works offline.</span>
   <span class="row"><button class="btn accent" id="installBtn" hidden>Install app</button><button class="btn ghost" id="installClose">Not now</button></span>
@@ -284,6 +290,11 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
     </section>
   </main>
 </div>
+<footer class="appfoot">
+  <span>Moccasin Maker <b>v<span id="appVersion"></span></b></span>
+  <span class="note" id="updateStatus"></span>
+  <button class="btn ghost" id="checkUpdates" hidden>Check for updates</button>
+</footer>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -969,10 +980,63 @@ $('rulerDist').addEventListener('input',renderPhoto);
 window.addEventListener('resize',()=>{if(PH.img){fitView();drawPhoto();}});
 
 
+/* ---------- app version and updates ---------- */
+const APP_VERSION='1.8.0';
+(function(){
+  $('appVersion').textContent=APP_VERSION;
+  const status=$('updateStatus'),checkBtn=$('checkUpdates'),bar=$('updateBar');
+  const say=t=>{status.textContent=t;};
+  if(!('serviceWorker' in navigator)||!/^https?:$/.test(location.protocol))return; // the claude.ai view updates itself
+  checkBtn.hidden=false;
+  const newer=(a,b)=>{const x=String(a).split('.').map(Number),y=String(b).split('.').map(Number);for(let i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0);}return false;};
+  let reg=null,userAsked=false,reloading=false,remote=null;
+  function showBar(ver){
+    let later=null;try{later=sessionStorage.getItem('mm-update-later');}catch(e){}
+    $('updateText').textContent=`Moccasin Maker ${ver?'v'+ver+' ':''}is ready. Updating keeps your measurements, layout and designs.`;
+    if(later&&!userAsked)return;
+    bar.hidden=false;say('An update is ready.');
+  }
+  function waitingReady(w){if(w&&navigator.serviceWorker.controller)showBar(remote&&remote.version);}
+  function track(w){if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed')waitingReady(w);});}
+  async function fetchRemote(){try{const r=await fetch('version.json?t='+Date.now(),{cache:'no-store'});if(r.ok)remote=await r.json();}catch(e){}return remote;}
+  async function check(manual){
+    if(manual){userAsked=true;say('Checking…');checkBtn.disabled=true;}
+    try{
+      const info=await fetchRemote();
+      if(reg){await reg.update().catch(()=>{});}
+      if(reg&&reg.waiting&&navigator.serviceWorker.controller){showBar(info&&info.version);if(manual)say('An update is ready.');}
+      else if(info&&newer(info.version,APP_VERSION)){if(manual)say(`Version ${info.version} found. Downloading…`);}
+      else if(manual)say(info?`You have the latest version (${APP_VERSION}).`:'Could not reach the server. Try again when you are online.');
+    }finally{if(manual)checkBtn.disabled=false;}
+  }
+  function applyUpdate(){
+    try{persist();}catch(e){}   // settings are already saved; this just makes sure the very latest edits are too
+    bar.hidden=true;say('Updating…');
+    const w=reg&&reg.waiting;
+    if(w){userAsked=true;w.postMessage({type:'SKIP_WAITING'});
+      setTimeout(()=>{if(!reloading){reloading=true;location.reload();}},4000); // safety net if controllerchange never fires
+    }else{reloading=true;location.reload();}
+  }
+  $('updateNow').onclick=applyUpdate;
+  $('updateLater').onclick=()=>{bar.hidden=true;try{sessionStorage.setItem('mm-update-later',(remote&&remote.version)||'?');}catch(e){}say('Update postponed. You will be asked again next time you open the app, or tap Check for updates.');};
+  checkBtn.onclick=()=>check(true);
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading||!userAsked)return;reloading=true;location.reload();});
+  window.addEventListener('load',async()=>{
+    try{reg=await navigator.serviceWorker.register('sw.js',{updateViaCache:'none'});}catch(e){return;}
+    if(reg.waiting)waitingReady(reg.waiting);
+    track(reg.installing);
+    reg.addEventListener('updatefound',()=>track(reg.installing));
+    check(false);
+  });
+  // iOS and Android resume installed apps instead of relaunching them, so check when the app comes back.
+  let last=Date.now();
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-last>5*60e3){last=Date.now();check(false);}});
+  setInterval(()=>{if(document.visibilityState==='visible'){last=Date.now();check(false);}},60*60e3);
+})();
+
 /* ---------- install as an app (PWA) ---------- */
 (function(){
   if(!('serviceWorker' in navigator)||!/^https?:$/.test(location.protocol))return;
-  window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});
   const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
   if(standalone)return;
   let dismissed=false;try{dismissed=localStorage.getItem('mm-install-dismissed')==='1';}catch(e){}
