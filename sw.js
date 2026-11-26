@@ -1,8 +1,9 @@
+// PWA-UPDATE-SYSTEM v1: auto-update, version banner, Check for updates. Do not remove this line.
 // Moccasin Maker service worker.
 // Keeps the app working offline and installs new versions safely.
 // It only ever touches its own caches ("mm-..."); localStorage, IndexedDB and
 // saved designs live outside the cache and are never cleared by an update.
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const CACHE = 'mm-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest',

@@ -165,6 +165,7 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
   </nav>
 </header>
 
+<!-- PWA-UPDATE-SYSTEM v1 -->
 <div class="install update" id="updateBar" role="status" aria-live="polite" hidden>
   <span id="updateText">A new version of Moccasin Maker is ready. Your measurements and designs are kept.</span>
   <span class="row"><button class="btn accent" id="updateNow">Update now</button><button class="btn ghost" id="updateLater">Later</button></span>
@@ -290,6 +291,7 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
     </section>
   </main>
 </div>
+<!-- PWA-UPDATE-SYSTEM v1 -->
 <footer class="appfoot">
   <span>Moccasin Maker <b>v<span id="appVersion"></span></b></span>
   <span class="note" id="updateStatus"></span>
@@ -981,7 +983,8 @@ window.addEventListener('resize',()=>{if(PH.img){fitView();drawPhoto();}});
 
 
 /* ---------- app version and updates ---------- */
-const APP_VERSION='1.8.0';
+// PWA-UPDATE-SYSTEM v1: auto-update, version banner, Check for updates. Do not remove this line.
+const APP_VERSION='1.8.1';
 (function(){
   $('appVersion').textContent=APP_VERSION;
   const status=$('updateStatus'),checkBtn=$('checkUpdates'),bar=$('updateBar');
