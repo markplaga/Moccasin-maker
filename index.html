@@ -102,7 +102,14 @@ details.adv[open] summary{margin-bottom:10px}
 .check.warn{border-left-color:var(--warn)} .check.warn .s{color:var(--warn)}
 .check.info{border-left-color:var(--accent)} .check.info .s{color:var(--muted)}
 .sheet-wrap{overflow:auto;background:var(--bg);border-radius:8px;padding:10px;max-height:78vh}
-.sheet-wrap svg{display:block;width:100%;min-width:640px;height:auto;background:var(--paper);border-radius:4px}
+.sheet-wrap svg{display:block;width:100%;min-width:640px;height:auto;background:var(--paper);border-radius:4px;user-select:none;-webkit-user-select:none}
+.sheet-wrap g.pc{cursor:grab}
+.sheet-wrap g.pc .hit{fill:var(--accent);fill-opacity:0;pointer-events:all}
+.sheet-wrap g.pc:hover .hit{fill-opacity:.06}
+.sheet-wrap g.pc.sel .hit{fill-opacity:.12}
+.sheet-wrap g.pc.bad .hit{fill:var(--bad);fill-opacity:.14}
+.layout-bar{margin:6px 0}
+.note.overlap{color:var(--bad);font-weight:600}
 .legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 table.pieces{border-collapse:collapse;width:100%;font-size:13px}
@@ -241,7 +248,7 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
     <section class="card" id="pattern">
       <div class="sec-head">
         <h2>Pattern</h2>
-        <p>Full-size pieces for one boot. Flip each piece over to cut the other boot. The dashed grid shows how the pattern splits across printed pages.</p>
+        <p>Full-size pieces for one boot. Flip each piece over to cut the other boot. The dashed grid shows how the pattern splits across printed pages. Drag pieces and turn them to fit fewer pages. Each piece keeps its own grain arrow, so any angle is fine.</p>
       </div>
       <div class="row">
         <button class="btn accent" id="dlPdf">Download pattern (PDF)</button>
@@ -255,6 +262,14 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
         <span><svg width="26" height="8"><circle cx="5" cy="4" r="2" fill="currentColor"/><circle cx="13" cy="4" r="2" fill="currentColor"/><circle cx="21" cy="4" r="2" fill="currentColor"/></svg>Punch holes</span>
         <span><svg width="26" height="10"><path d="M13 9V1" stroke="currentColor" stroke-width="1.5"/></svg>Notch, match the numbers</span>
       </div>
+      <div class="row layout-bar">
+        <button class="btn ghost" id="autoArr">Auto-arrange</button>
+        <button class="btn ghost" id="rotL" disabled aria-label="Turn selected piece 15 degrees left">↺ 15°</button>
+        <button class="btn ghost" id="rot90" disabled>Turn 90°</button>
+        <button class="btn ghost" id="rotR" disabled aria-label="Turn selected piece 15 degrees right">↻ 15°</button>
+        <span class="note" id="selNote"></span>
+      </div>
+      <p class="note overlap" id="overlapNote" hidden></p>
       <div class="sheet-wrap" id="sheet"></div>
       <div class="tablewrap"><table class="pieces" id="pieceTable"></table></div>
     </section>
@@ -477,26 +492,67 @@ function buildPieces(g){
   }
   return pieces;
 }
-function layoutPieces(pieces){
-  const gap=14;let maxW=0;
-  for(const p of pieces){const pts=[];for(const q of p.pr){if(q.pts)pts.push(...q.pts);if(q.p)pts.push(q.p);}const b=bbox(pts);p.b={x0:b.x0-8,y0:b.y0-8,x1:b.x1+8,y1:b.y1+8};p.bw=p.b.x1-p.b.x0;p.bh=p.b.y1-p.b.y0;maxW=Math.max(maxW,p.bw);}
-  // shelf-pack at several widths and keep the one that needs the fewest printed pages
-  const pd=paperDims(),pw=pd.w-2*MARGIN,ph=pd.h-2*MARGIN-FOOT;
-  const order=[...pieces].sort((a,b)=>b.bh-a.bh);
-  function pack(limit){let x=gap,y=30,rowH=0,W=0;const pos=[];for(const p of order){if(x+p.bw>limit+gap&&x>gap){x=gap;y+=rowH+gap;rowH=0;}pos.push([p,x,y]);x+=p.bw+gap;rowH=Math.max(rowH,p.bh);W=Math.max(W,x);}
-    const H=y+rowH+gap;let pages=0;const cols=Math.ceil(W/pw),rows=Math.ceil(H/ph);
-    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const tx=c*pw,ty=r*ph;if(pos.some(([p,x,y])=>!(x+p.bw<tx||x>tx+pw||y+p.bh<ty||y>ty+ph)))pages++;}
-    return {pos,W,H,pages};}
-  let best=null;for(let lim=maxW;lim<=Math.max(maxW,1000);lim+=15){const r=pack(lim);if(!best||r.pages<best.pages||(r.pages===best.pages&&r.W*r.H<best.W*best.H))best=r;}
-  for(const [p,x,y] of best.pos){p.ox=x;p.oy=y;}
-  const W=best.W,Hs=best.H;const prims=[];
-  prims.push({k:'text',p:[gap,14],s:6,t:'Ankle boot moccasin pattern',a:'start',b:1});
-  prims.push({k:'text',p:[gap,22],s:3.6,t:`Foot ${S.L.toFixed(0)} x ${S.W.toFixed(0)} mm. Wall ${S.wall} mm, ease ${S.ease} mm, cuff ${S.shaft} mm. Print at 100%.`,a:'start'});
-  for(const p of pieces){const T=q=>[q[0]-p.b.x0+p.ox,(p.b.y1-q[1])+p.oy];
-    for(const q of p.pr){const n=Object.assign({},q);if(q.pts)n.pts=q.pts.map(T);if(q.p)n.p=T(q.p);prims.push(n);}
-    p.sx=[p.ox,p.oy,p.ox+p.bw,p.oy+p.bh];}
-  return {prims,W,H:Hs};
+/* ---------- layout: pieces can be dragged and rotated freely on the sheet ---------- */
+const GAP=14,TOP=30;
+function prepPieces(pieces){
+  for(const p of pieces){const pts=[];for(const q of p.pr){if(q.pts)pts.push(...q.pts);if(q.p)pts.push(q.p);}const b=bbox(pts);
+    p.b={x0:b.x0-8,y0:b.y0-8,x1:b.x1+8,y1:b.y1+8};p.bw=p.b.x1-p.b.x0;p.bh=p.b.y1-p.b.y0;p.c0=[(p.b.x0+p.b.x1)/2,(p.b.y0+p.b.y1)/2];}
 }
+function normRot(r){r=Math.round(r)%360;return r<0?r+360:r;}
+// local (y-up mm) -> sheet (y-down mm), rotated clockwise by L.rot around the piece centre
+function placer(p,L){const th=L.rot*Math.PI/180,c=Math.cos(th),s=Math.sin(th);
+  return q=>{const vx=q[0]-p.c0[0],vy=-(q[1]-p.c0[1]);return [L.cx+vx*c-vy*s,L.cy+vx*s+vy*c];};}
+function placedBox(p,L){const T=placer(p,L);  // tight box from the real outline points, padded like the unrotated case
+  const pts=[];for(const q of p.pr){if(q.pts)pts.push(...q.pts);if(q.p)pts.push(q.p);}const t=bbox(pts.map(T));
+  return [t.x0-8,t.y0-8,t.x1+8,t.y1+8];}
+function autoArrange(pieces){
+  const pd=paperDims(),pw=pd.w-2*MARGIN,ph=pd.h-2*MARGIN-FOOT;
+  function pack(dims,limit){const order=[...dims].sort((a,b)=>b.h-a.h);let x=GAP,y=TOP,rowH=0,W=0;const pos=[];
+    for(const d of order){if(x+d.w>limit+GAP&&x>GAP){x=GAP;y+=rowH+GAP;rowH=0;}pos.push([d,x,y]);x+=d.w+GAP;rowH=Math.max(rowH,d.h);W=Math.max(W,x);}
+    const H=y+rowH+GAP;let pages=0;const cols=Math.ceil(W/pw),rows=Math.ceil(H/ph);
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const tx=c*pw,ty=r*ph;if(pos.some(([d,x,y])=>!(x+d.w<tx||x>tx+pw||y+d.h<ty||y>ty+ph)))pages++;}
+    return {pos,W,H,pages};}
+  let best=null;const n=pieces.length;
+  for(let m=0;m<(1<<n);m++){
+    const dims=pieces.map((p,i)=>{const rot=(m>>i)&1?90:0;return {p,rot,w:rot?p.bh:p.bw,h:rot?p.bw:p.bh};});
+    const maxW=Math.max(...dims.map(d=>d.w));
+    for(let lim=maxW;lim<=Math.max(maxW,1000);lim+=15){const r=pack(dims,lim);
+      if(!best||r.pages<best.pages||(r.pages===best.pages&&r.W*r.H<best.W*best.H-1))best=r;}
+  }
+  const out={};for(const [d,x,y] of best.pos)out[d.p.id]={cx:x+d.w/2,cy:y+d.h/2,rot:d.rot};
+  return out;
+}
+function ensureLayout(pieces){
+  if(!S.layout||typeof S.layout!=='object')S.layout={};
+  const missing=pieces.filter(p=>!S.layout[p.id]);
+  if(missing.length===pieces.length){S.layout=autoArrange(pieces);return;}
+  let y=TOP;for(const p of pieces)if(S.layout[p.id])y=Math.max(y,placedBox(p,S.layout[p.id])[3]);
+  let x=GAP;for(const p of missing){S.layout[p.id]={cx:x+p.bw/2,cy:y+GAP+p.bh/2,rot:0};x+=p.bw+GAP;}
+}
+function layoutPieces(pieces){
+  prepPieces(pieces);ensureLayout(pieces);
+  const prims=[];let W=0,H=0;
+  prims.push({k:'text',p:[GAP,14],s:6,t:'Ankle boot moccasin pattern',a:'start',b:1});
+  prims.push({k:'text',p:[GAP,22],s:3.6,t:`Foot ${S.L.toFixed(0)} x ${S.W.toFixed(0)} mm. Wall ${S.wall} mm, ease ${S.ease} mm, cuff ${S.shaft} mm. Print at 100%.`,a:'start'});
+  for(const p of pieces){const L=S.layout[p.id];L.rot=normRot(L.rot||0);
+    // keep every piece on the sheet (nothing left of or above the first page)
+    let bx=placedBox(p,L);if(bx[0]<0){L.cx-=bx[0];}if(bx[1]<0){L.cy-=bx[1];}bx=placedBox(p,L);
+    const T=placer(p,L);p.prims=[];
+    for(const q of p.pr){const n=Object.assign({},q);if(q.pts)n.pts=q.pts.map(T);
+      if(q.k==='text'){n.p=T([q.p[0],q.p[1]-(q.dy||0)]);n.dy=0;n.rot=L.rot;}else if(q.p)n.p=T(q.p);
+      p.prims.push(n);prims.push(n);}
+    p.outline=p.prims.filter(q=>q.k==='cut'&&q.closed).map(q=>q.pts);
+    p.sx=bx;W=Math.max(W,bx[2]+GAP);H=Math.max(H,bx[3]+GAP);}
+  return {prims,W,H};
+}
+function pip(pt,poly){let ins=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];
+  if((a[1]>pt[1])!==(b[1]>pt[1])&&pt[0]<(b[0]-a[0])*(pt[1]-a[1])/(b[1]-a[1])+a[0])ins=!ins;}return ins;}
+function piecesOverlap(a,b){const A=a.sx,B=b.sx;if(A[2]-8<B[0]+8||B[2]-8<A[0]+8||A[3]-8<B[1]+8||B[3]-8<A[1]+8)return false;
+  for(const pa of a.outline)for(const pb of b.outline){
+    for(let i=0;i<pa.length;i+=2)if(pip(pa[i],pb))return true;
+    for(let i=0;i<pb.length;i+=2)if(pip(pb[i],pa))return true;}
+  return false;}
+function overlaps(){const out=[];for(let i=0;i<PIECES.length;i++)for(let j=i+1;j<PIECES.length;j++)if(piecesOverlap(PIECES[i],PIECES[j]))out.push([PIECES[i],PIECES[j]]);return out;}
 
 /* ---------- renderers ---------- */
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -508,7 +564,7 @@ function primsSVG(prims,col,soft){let s='';
     else if(q.k==='thin')s+=`<path d="${pathD(q.pts)}" fill="none" stroke="${col}" stroke-width="0.3"/>`;
     else if(q.k==='notch')s+=`<path d="${pathD(q.pts)}" fill="none" stroke="${col}" stroke-width="0.6"/>`;
     else if(q.k==='hole')s+=`<circle cx="${q.p[0].toFixed(2)}" cy="${q.p[1].toFixed(2)}" r="${q.r||0.8}" fill="${col}"/>`;
-    else if(q.k==='text')s+=`<text x="${q.p[0].toFixed(2)}" y="${(q.p[1]+(q.dy||0)).toFixed(2)}" font-size="${q.s}" text-anchor="${q.a||'start'}" font-family="Helvetica, Arial, sans-serif" ${q.b?'font-weight="700"':''} fill="${col}">${esc(q.t)}</text>`;
+    else if(q.k==='text')s+=`<text x="${q.p[0].toFixed(2)}" y="${(q.p[1]+(q.dy||0)).toFixed(2)}"${q.rot?` transform="rotate(${q.rot} ${q.p[0].toFixed(2)} ${(q.p[1]+(q.dy||0)).toFixed(2)})"`:''} font-size="${q.s}" text-anchor="${q.a||'start'}" font-family="Helvetica, Arial, sans-serif" ${q.b?'font-weight="700"':''} fill="${col}">${esc(q.t)}</text>`;
   }return s;}
 function primsPDF(doc,prims,dx,dy){
   doc.setDrawColor(0);doc.setFillColor(0);doc.setTextColor(0);
@@ -519,7 +575,9 @@ function primsPDF(doc,prims,dx,dy){
       const d=[];for(let i=1;i<pts.length;i++)d.push([pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]]);
       doc.lines(d,pts[0][0],pts[0][1],[1,1],'S',!!q.closed);
     }else if(q.k==='hole'){doc.circle(q.p[0]+dx,q.p[1]+dy,q.r||0.8,'F');}
-    else if(q.k==='text'){doc.setFont('helvetica',q.b?'bold':'normal');doc.setFontSize(q.s*2.835);doc.text(q.t,q.p[0]+dx,q.p[1]+dy+(q.dy||0),{align:q.a==='middle'?'center':'left'});}
+    else if(q.k==='text'){doc.setFont('helvetica',q.b?'bold':'normal');doc.setFontSize(q.s*2.835);let x=q.p[0]+dx,y=q.p[1]+dy+(q.dy||0);
+      if(!q.rot){doc.text(q.t,x,y,{align:q.a==='middle'?'center':'left'});}
+      else{const th=q.rot*Math.PI/180;if(q.a==='middle'){const w=doc.getTextWidth(q.t)/2;x-=w*Math.cos(th);y-=w*Math.sin(th);}doc.text(q.t,x,y,{angle:-q.rot});}}
   }
   doc.setLineDashPattern([],0);
 }
@@ -612,17 +670,60 @@ function tiles(){const p=paperDims();const pw=p.w-2*MARGIN,ph=p.h-2*MARGIN-FOOT;
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const x=c*pw,y=r*ph;const used=PIECES.some(pc=>!(pc.sx[2]<x||pc.sx[0]>x+pw||pc.sx[3]<y||pc.sx[1]>y+ph));list.push({r,c,x,y,used,code:String.fromCharCode(65+r)+(c+1)});}
   return {pw,ph,cols,rows,list};}
 
+let SEL=null,DRAG=null;
+// draws the layout sheet; during a drag the viewBox is frozen so the page doesn't jump
+function drawSheet(view){
+  const T=tiles();
+  const VW=view?view[0]:(T.cols+1)*T.pw,VH=view?view[1]:(T.rows+1)*T.ph;
+  let grid='';for(const t of T.list){grid+=`<rect x="${t.x}" y="${t.y}" width="${T.pw}" height="${T.ph}" fill="${t.used?'none':'var(--soft)'}" fill-opacity="${t.used?0:.5}" stroke="var(--accent)" stroke-width=".5" stroke-dasharray="5 4"/><text x="${t.x+4}" y="${t.y+9}" font-size="7" fill="var(--accent)" font-family="IBM Plex Mono, monospace">${t.used?t.code:''}</text>`;}
+  const ov=overlaps(),bad=new Set();for(const [a,b] of ov){bad.add(a.id);bad.add(b.id);}
+  const head=SHEET.prims.filter(q=>!PIECES.some(p=>p.prims.includes(q)));
+  let body=primsSVG(head,'var(--pat)','var(--pat-soft)');
+  for(const p of PIECES){const sel=p.id===SEL,hit=p.outline.map(o=>pathD(o,true)).join('');
+    body+=`<g class="pc${sel?' sel':''}${bad.has(p.id)?' bad':''}" data-id="${p.id}"><path class="hit" d="${hit}"/>${primsSVG(p.prims,'var(--pat)','var(--pat-soft)')}</g>`;}
+  $('sheet').innerHTML=`<svg viewBox="0 0 ${VW.toFixed(1)} ${VH.toFixed(1)}" data-vw="${VW}" data-vh="${VH}" role="img" aria-label="Pattern pieces laid out full size. Drag a piece to move it.">${grid}${body}</svg>`;
+  const used=T.list.filter(t=>t.used).length;
+  $('pageNote').textContent=`${used} ${paperDims().name} pages plus a cover page with test squares`;
+  const selP=PIECES.find(p=>p.id===SEL);
+  $('selNote').textContent=selP?`${selP.name} selected, turned ${S.layout[SEL].rot}°.`:'Drag a piece to move it. Tap a piece to select it, then turn it.';
+  for(const id of ['rotL','rot90','rotR'])$(id).disabled=!selP;
+  const on=$('overlapNote');on.hidden=!ov.length;
+  if(ov.length)on.textContent=`${ov.map(([a,b])=>a.name+' and '+b.name).join(', ')} overlap. Move them apart before printing.`;
+}
+function relayout(view){SHEET=layoutPieces(PIECES);drawSheet(view);}
+function sheetPoint(e){const svg=$('sheet').querySelector('svg');const m=svg.getScreenCTM();if(!m)return [0,0];
+  const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const r=pt.matrixTransform(m.inverse());return [r.x,r.y];}
+function turnSel(d){if(!SEL||!S.layout[SEL])return;S.layout[SEL].rot=normRot(S.layout[SEL].rot+d);relayout();persist();}
+$('sheet').addEventListener('pointerdown',e=>{
+  const g=e.target.closest&&e.target.closest('g.pc');
+  if(!g){if(SEL){SEL=null;drawSheet();}return;}
+  e.preventDefault();SEL=g.dataset.id;const svg=$('sheet').querySelector('svg');
+  const L=S.layout[SEL],p0=sheetPoint(e);
+  DRAG={id:SEL,dx:L.cx-p0[0],dy:L.cy-p0[1],view:[+svg.dataset.vw,+svg.dataset.vh],raf:0,last:null,moved:false};
+  drawSheet(DRAG.view);
+});
+window.addEventListener('pointermove',e=>{if(!DRAG)return;DRAG.last=e;if(DRAG.raf)return;
+  DRAG.raf=requestAnimationFrame(()=>{DRAG.raf=0;const p=sheetPoint(DRAG.last),L=S.layout[DRAG.id];
+    const nx=Math.min(Math.max(p[0]+DRAG.dx,0),DRAG.view[0]),ny=Math.min(Math.max(p[1]+DRAG.dy,0),DRAG.view[1]);
+    if(Math.abs(nx-L.cx)+Math.abs(ny-L.cy)<0.2)return;L.cx=nx;L.cy=ny;DRAG.moved=true;relayout(DRAG.view);});});
+function endDrag(){if(!DRAG)return;if(DRAG.raf)cancelAnimationFrame(DRAG.raf);const moved=DRAG.moved;DRAG=null;relayout();if(moved)persist();}
+window.addEventListener('pointerup',endDrag);window.addEventListener('pointercancel',endDrag);
+// stop the page from scrolling when a finger starts on a piece (iOS ignores touch-action on SVG children)
+$('sheet').addEventListener('touchstart',e=>{if(e.target.closest&&e.target.closest('g.pc'))e.preventDefault();},{passive:false});
+$('autoArr').onclick=()=>{S.layout=autoArrange(PIECES);relayout();persist();toast('Pieces arranged to use the fewest pages.');};
+$('rotL').onclick=()=>turnSel(-15);$('rotR').onclick=()=>turnSel(15);$('rot90').onclick=()=>turnSel(90);
+document.addEventListener('keydown',e=>{if(!SEL||/INPUT|SELECT|TEXTAREA/.test(document.activeElement&&document.activeElement.tagName||''))return;
+  const L=S.layout[SEL];if(!L)return;const step=e.shiftKey?10:1;let hit=true;
+  if(e.key==='ArrowLeft')L.cx-=step;else if(e.key==='ArrowRight')L.cx+=step;else if(e.key==='ArrowUp')L.cy-=step;else if(e.key==='ArrowDown')L.cy+=step;
+  else if(e.key==='r'||e.key==='R')L.rot=normRot(L.rot+(e.shiftKey?-15:15));else if(e.key==='Escape'){SEL=null;}else hit=false;
+  if(hit){e.preventDefault();relayout();persist();}});
+
 function render(){
   G=compute();PIECES=buildPieces(G);SHEET=layoutPieces(PIECES);
   $('sideView').innerHTML=sideView(G);$('topView').innerHTML=topView(G);
   $('sideCap').textContent=`${LEATHER[S.leather].n} · ${$('cuff').selectedOptions[0].text.toLowerCase()} cuff`;
   $('topCap').textContent=`${fmt(S.L)} × ${fmt(S.W)}`;
-  // pattern sheet
-  const T=tiles();
-  let grid='';for(const t of T.list){grid+=`<rect x="${t.x}" y="${t.y}" width="${T.pw}" height="${T.ph}" fill="${t.used?'none':'var(--soft)'}" fill-opacity="${t.used?0:.5}" stroke="var(--accent)" stroke-width=".5" stroke-dasharray="5 4"/><text x="${t.x+4}" y="${t.y+9}" font-size="7" fill="var(--accent)" font-family="IBM Plex Mono, monospace">${t.used?t.code:''}</text>`;}
-  $('sheet').innerHTML=`<svg viewBox="0 0 ${(T.cols*T.pw).toFixed(1)} ${(T.rows*T.ph).toFixed(1)}" role="img" aria-label="Pattern pieces laid out full size">${grid}${primsSVG(SHEET.prims,'var(--pat)','var(--pat-soft)')}</svg>`;
-  const used=T.list.filter(t=>t.used).length;
-  $('pageNote').textContent=`${used} ${paperDims().name} pages plus a cover page with test squares`;
+  drawSheet();
   checksAndTables();
   persist();
 }

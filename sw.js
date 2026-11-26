@@ -1,5 +1,5 @@
 // Moccasin Maker service worker: keeps the app working offline once it has been opened.
-const VERSION = 'mm-v4';
+const VERSION = 'mm-v5';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png',
