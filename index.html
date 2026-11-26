@@ -103,7 +103,7 @@ details.adv[open] summary{margin-bottom:10px}
 .check.info{border-left-color:var(--accent)} .check.info .s{color:var(--muted)}
 .sheet-wrap{overflow:auto;background:var(--bg);border-radius:8px;padding:10px;max-height:78vh}
 .sheet-wrap svg{display:block;width:100%;min-width:640px;height:auto;background:var(--paper);border-radius:4px;user-select:none;-webkit-user-select:none}
-.sheet-wrap g.pc{cursor:grab}
+.sheet-wrap g.pc{cursor:grab;touch-action:none}
 .sheet-wrap g.pc .hit{fill:var(--accent);fill-opacity:0;pointer-events:all}
 .sheet-wrap g.pc:hover .hit{fill-opacity:.06}
 .sheet-wrap g.pc.sel .hit{fill-opacity:.12}
@@ -672,45 +672,53 @@ function tiles(){const p=paperDims();const pw=p.w-2*MARGIN,ph=p.h-2*MARGIN-FOOT;
   return {pw,ph,cols,rows,list};}
 
 let SEL=null,DRAG=null;
-// draws the layout sheet; during a drag the viewBox is frozen so the page doesn't jump
-function drawSheet(view){
-  const T=tiles();
-  const VW=view?view[0]:(T.cols+1)*T.pw,VH=view?view[1]:(T.rows+1)*T.ph;
-  let grid='';for(const t of T.list){grid+=`<rect x="${t.x}" y="${t.y}" width="${T.pw}" height="${T.ph}" fill="${t.used?'none':'var(--soft)'}" fill-opacity="${t.used?0:.5}" stroke="var(--accent)" stroke-width=".5" stroke-dasharray="5 4"/><text x="${t.x+4}" y="${t.y+9}" font-size="7" fill="var(--accent)" font-family="IBM Plex Mono, monospace">${t.used?t.code:''}</text>`;}
+function tilesSVG(T){let grid='';for(const t of T.list){grid+=`<rect x="${t.x}" y="${t.y}" width="${T.pw}" height="${T.ph}" fill="${t.used?'none':'var(--soft)'}" fill-opacity="${t.used?0:.5}" stroke="var(--accent)" stroke-width=".5" stroke-dasharray="5 4"/><text x="${t.x+4}" y="${t.y+9}" font-size="7" fill="var(--accent)" font-family="IBM Plex Mono, monospace">${t.used?t.code:''}</text>`;}return grid;}
+function pageNote(T){$('pageNote').textContent=`${T.list.filter(t=>t.used).length} ${paperDims().name} pages plus a cover page with test squares`;}
+function selUI(){const selP=PIECES.find(p=>p.id===SEL);
+  $('selNote').textContent=selP?`${selP.name} selected, turned ${S.layout[SEL].rot}°.`:'Drag a piece to move it. Tap a piece to select it, then turn it.';
+  for(const id of ['rotL','rot90','rotR'])$(id).disabled=!selP;
+  for(const g of $('sheet').querySelectorAll('g.pc'))g.classList.toggle('sel',g.dataset.id===SEL);}
+function drawSheet(){
+  const T=tiles();const VW=(T.cols+1)*T.pw,VH=(T.rows+1)*T.ph;
   const ov=overlaps(),bad=new Set();for(const [a,b] of ov){bad.add(a.id);bad.add(b.id);}
   const head=SHEET.prims.filter(q=>!PIECES.some(p=>p.prims.includes(q)));
   let body=primsSVG(head,'var(--pat)','var(--pat-soft)');
-  for(const p of PIECES){const sel=p.id===SEL,hit=p.outline.map(o=>pathD(o,true)).join('');
-    body+=`<g class="pc${sel?' sel':''}${bad.has(p.id)?' bad':''}" data-id="${p.id}"><path class="hit" d="${hit}"/>${primsSVG(p.prims,'var(--pat)','var(--pat-soft)')}</g>`;}
-  $('sheet').innerHTML=`<svg viewBox="0 0 ${VW.toFixed(1)} ${VH.toFixed(1)}" data-vw="${VW}" data-vh="${VH}" role="img" aria-label="Pattern pieces laid out full size. Drag a piece to move it.">${grid}${body}</svg>`;
-  const used=T.list.filter(t=>t.used).length;
-  $('pageNote').textContent=`${used} ${paperDims().name} pages plus a cover page with test squares`;
-  const selP=PIECES.find(p=>p.id===SEL);
-  $('selNote').textContent=selP?`${selP.name} selected, turned ${S.layout[SEL].rot}°.`:'Drag a piece to move it. Tap a piece to select it, then turn it.';
-  for(const id of ['rotL','rot90','rotR'])$(id).disabled=!selP;
+  for(const p of PIECES){const hit=p.outline.map(o=>pathD(o,true)).join('');
+    body+=`<g class="pc${bad.has(p.id)?' bad':''}" data-id="${p.id}"><path class="hit" d="${hit}"/>${primsSVG(p.prims,'var(--pat)','var(--pat-soft)')}</g>`;}
+  $('sheet').innerHTML=`<svg viewBox="0 0 ${VW.toFixed(1)} ${VH.toFixed(1)}" data-vw="${VW}" data-vh="${VH}" role="img" aria-label="Pattern pieces laid out full size. Drag a piece to move it."><g class="tiles">${tilesSVG(T)}</g>${body}</svg>`;
+  pageNote(T);selUI();
   const on=$('overlapNote');on.hidden=!ov.length;
   if(ov.length)on.textContent=`${ov.map(([a,b])=>a.name+' and '+b.name).join(', ')} overlap. Move them apart before printing.`;
 }
-function relayout(view){SHEET=layoutPieces(PIECES);drawSheet(view);}
+function relayout(){SHEET=layoutPieces(PIECES);drawSheet();}
 function sheetPoint(e){const svg=$('sheet').querySelector('svg');const m=svg.getScreenCTM();if(!m)return [0,0];
   const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const r=pt.matrixTransform(m.inverse());return [r.x,r.y];}
 function turnSel(d){if(!SEL||!S.layout[SEL])return;S.layout[SEL].rot=normRot(S.layout[SEL].rot+d);relayout();persist();}
+// Dragging moves the piece's existing SVG group with a transform and never rebuilds the sheet,
+// so iPad Safari keeps delivering touch events to it instead of scrolling.
 $('sheet').addEventListener('pointerdown',e=>{
   const g=e.target.closest&&e.target.closest('g.pc');
-  if(!g){if(SEL){SEL=null;drawSheet();}return;}
-  e.preventDefault();SEL=g.dataset.id;const svg=$('sheet').querySelector('svg');
-  const L=S.layout[SEL],p0=sheetPoint(e);
-  DRAG={id:SEL,dx:L.cx-p0[0],dy:L.cy-p0[1],view:[+svg.dataset.vw,+svg.dataset.vh],raf:0,last:null,moved:false};
-  drawSheet(DRAG.view);
+  if(!g){if(SEL){SEL=null;selUI();}return;}
+  if(e.button>0)return;
+  e.preventDefault();SEL=g.dataset.id;selUI();
+  const svg=$('sheet').querySelector('svg');try{svg.setPointerCapture(e.pointerId);}catch(_){}
+  const L=S.layout[SEL],p0=sheetPoint(e),pc=PIECES.find(p=>p.id===SEL);
+  DRAG={id:SEL,g,pc,p0,cx0:L.cx,cy0:L.cy,sx0:pc.sx.slice(),view:[+svg.dataset.vw,+svg.dataset.vh],raf:0,last:null,moved:false,pid:e.pointerId};
 });
-window.addEventListener('pointermove',e=>{if(!DRAG)return;DRAG.last=e;if(DRAG.raf)return;
-  DRAG.raf=requestAnimationFrame(()=>{DRAG.raf=0;const p=sheetPoint(DRAG.last),L=S.layout[DRAG.id];
-    const nx=Math.min(Math.max(p[0]+DRAG.dx,0),DRAG.view[0]),ny=Math.min(Math.max(p[1]+DRAG.dy,0),DRAG.view[1]);
-    if(Math.abs(nx-L.cx)+Math.abs(ny-L.cy)<0.2)return;L.cx=nx;L.cy=ny;DRAG.moved=true;relayout(DRAG.view);});});
-function endDrag(){if(!DRAG)return;if(DRAG.raf)cancelAnimationFrame(DRAG.raf);const moved=DRAG.moved;DRAG=null;relayout();if(moved)persist();}
+function dragStep(){DRAG.raf=0;const p=sheetPoint(DRAG.last),L=S.layout[DRAG.id];
+  let dx=p[0]-DRAG.p0[0],dy=p[1]-DRAG.p0[1];
+  dx=Math.min(Math.max(dx,-DRAG.sx0[0]),DRAG.view[0]-DRAG.sx0[2]);dy=Math.min(Math.max(dy,-DRAG.sx0[1]),DRAG.view[1]-DRAG.sx0[3]);
+  if(!DRAG.moved&&Math.abs(dx)+Math.abs(dy)<1)return;DRAG.moved=true;
+  L.cx=DRAG.cx0+dx;L.cy=DRAG.cy0+dy;DRAG.g.setAttribute('transform',`translate(${dx.toFixed(2)} ${dy.toFixed(2)})`);
+  const s=DRAG.sx0;DRAG.pc.sx=[s[0]+dx,s[1]+dy,s[2]+dx,s[3]+dy];
+  SHEET.W=Math.max(...PIECES.map(q=>q.sx[2]+GAP));SHEET.H=Math.max(...PIECES.map(q=>q.sx[3]+GAP));
+  const T=tiles();const tg=$('sheet').querySelector('g.tiles');if(tg)tg.innerHTML=tilesSVG(T);pageNote(T);}
+window.addEventListener('pointermove',e=>{if(!DRAG||e.pointerId!==DRAG.pid)return;e.preventDefault();DRAG.last=e;if(!DRAG.raf)DRAG.raf=requestAnimationFrame(dragStep);},{passive:false});
+function endDrag(e){if(!DRAG||(e&&e.pointerId!==DRAG.pid))return;if(DRAG.raf){cancelAnimationFrame(DRAG.raf);if(DRAG.last)dragStep();}const moved=DRAG.moved;DRAG=null;if(moved){relayout();persist();}}
 window.addEventListener('pointerup',endDrag);window.addEventListener('pointercancel',endDrag);
-// stop the page from scrolling when a finger starts on a piece (iOS ignores touch-action on SVG children)
+// iPad: block scrolling when a finger starts on a piece, and for the whole drag
 $('sheet').addEventListener('touchstart',e=>{if(e.target.closest&&e.target.closest('g.pc'))e.preventDefault();},{passive:false});
+document.addEventListener('touchmove',e=>{if(DRAG)e.preventDefault();},{passive:false});
 $('autoArr').onclick=()=>{S.layout=autoArrange(PIECES);relayout();persist();toast('Pieces arranged to use the fewest pages.');};
 $('rotL').onclick=()=>turnSel(-15);$('rotR').onclick=()=>turnSel(15);$('rot90').onclick=()=>turnSel(90);
 document.addEventListener('keydown',e=>{if(!SEL||/INPUT|SELECT|TEXTAREA/.test(document.activeElement&&document.activeElement.tagName||''))return;
