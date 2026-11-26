@@ -4,6 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Moccasin Maker</title>
+<meta name="theme-color" content="#1D2A3F">
+<meta name="description" content="Size your foot from a photo, design an ankle-boot moccasin and print a full-size sewing pattern.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Moccasins">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -129,6 +139,8 @@ ol.steps ul{margin:6px 0 0;padding-left:18px}
 input[type=file]{font-size:13px;max-width:100%}
 label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+.install{max-width:1360px;margin:0 auto 14px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;background:var(--accent-soft);border-radius:var(--r);padding:12px 14px;font-size:14px}
+.install .ios-steps b{font-weight:600}
 </style>
 </head>
 <body>
@@ -144,6 +156,10 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
   </nav>
 </header>
 
+<div class="install" id="installBar" hidden>
+  <span id="installText">Install Moccasin Maker on this device. It opens like an app and works offline.</span>
+  <span class="row"><button class="btn accent" id="installBtn" hidden>Install app</button><button class="btn ghost" id="installClose">Not now</button></span>
+</div>
 <div class="layout">
   <aside class="rail" aria-label="Measurements and options">
     <div class="row" style="justify-content:space-between">
@@ -834,6 +850,28 @@ $('m-grid').onclick=()=>{PH.mode='grid';PH.pts=[];$('m-grid').setAttribute('aria
 $('m-ruler').onclick=()=>{PH.mode='ruler';PH.pts=[];$('m-ruler').setAttribute('aria-pressed','true');$('m-grid').setAttribute('aria-pressed','false');if(!$('rulerDist').value)$('rulerDist').value=S.unit==='in'?10:25;renderPhoto();};
 $('rulerDist').addEventListener('input',renderPhoto);
 window.addEventListener('resize',()=>{if(PH.img){fitView();drawPhoto();}});
+
+
+/* ---------- install as an app (PWA) ---------- */
+(function(){
+  if(!('serviceWorker' in navigator)||!/^https?:$/.test(location.protocol))return;
+  window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});
+  const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  if(standalone)return;
+  let dismissed=false;try{dismissed=localStorage.getItem('mm-install-dismissed')==='1';}catch(e){}
+  if(dismissed)return;
+  const bar=$('installBar'),btn=$('installBtn');let deferred=null;
+  $('installClose').onclick=()=>{bar.hidden=true;try{localStorage.setItem('mm-install-dismissed','1');}catch(e){}};
+  window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;btn.hidden=false;bar.hidden=false;});
+  btn.onclick=async()=>{if(!deferred)return;deferred.prompt();const r=await deferred.userChoice.catch(()=>null);deferred=null;bar.hidden=true;if(r&&r.outcome==='accepted')toast('Installed. Find Moccasin Maker on your home screen.');};
+  window.addEventListener('appinstalled',()=>{bar.hidden=true;});
+  const ua=navigator.userAgent,isIOS=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isIOS){
+    const safari=/Safari/.test(ua)&&!/CriOS|FxiOS|EdgiOS/.test(ua);
+    $('installText').innerHTML=safari?'<span class="ios-steps">Install on iPhone or iPad: tap <b>Share</b> <svg width="14" height="16" viewBox="0 0 14 16" aria-hidden="true" style="vertical-align:-2px"><path d="M7 1v9M3.5 4.5 7 1l3.5 3.5M2 7v7h10V7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>, then <b>Add to Home Screen</b>.</span>':'<span class="ios-steps">To install on iPhone or iPad, open this page in <b>Safari</b>, tap <b>Share</b>, then <b>Add to Home Screen</b>.</span>';
+    bar.hidden=false;
+  }
+})();
 
 /* ---------- wire up ---------- */
 buildControls();syncInputs();render();renderPhoto();
