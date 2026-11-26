@@ -165,7 +165,7 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
   </nav>
 </header>
 
-<!-- PWA-UPDATE-SYSTEM v1 -->
+<!-- PWA-UPDATE-SYSTEM v2 -->
 <div class="install update" id="updateBar" role="status" aria-live="polite" hidden>
   <span id="updateText">A new version of Moccasin Maker is ready. Your measurements and designs are kept.</span>
   <span class="row"><button class="btn accent" id="updateNow">Update now</button><button class="btn ghost" id="updateLater">Later</button></span>
@@ -291,7 +291,7 @@ label.toggle{display:flex;gap:8px;align-items:center;font-size:13px;cursor:point
     </section>
   </main>
 </div>
-<!-- PWA-UPDATE-SYSTEM v1 -->
+<!-- PWA-UPDATE-SYSTEM v2 -->
 <footer class="appfoot">
   <span>Moccasin Maker <b>v<span id="appVersion"></span></b></span>
   <span class="note" id="updateStatus"></span>
@@ -983,58 +983,274 @@ window.addEventListener('resize',()=>{if(PH.img){fitView();drawPhoto();}});
 
 
 /* ---------- app version and updates ---------- */
-// PWA-UPDATE-SYSTEM v1: auto-update, version banner, Check for updates. Do not remove this line.
-const APP_VERSION='1.8.1';
+// PWA-UPDATE-SYSTEM v2: auto-update, version banner, Check for updates. Do not remove this line.
+const APP_RELEASE='1.8.2-20261126-1';
+const APP_VERSION='1.8.2';
 (function(){
-  $('appVersion').textContent=APP_VERSION;
-  const status=$('updateStatus'),checkBtn=$('checkUpdates'),bar=$('updateBar');
-  const say=t=>{status.textContent=t;};
-  if(!('serviceWorker' in navigator)||!/^https?:$/.test(location.protocol))return; // the claude.ai view updates itself
-  checkBtn.hidden=false;
-  const newer=(a,b)=>{const x=String(a).split('.').map(Number),y=String(b).split('.').map(Number);for(let i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0);}return false;};
-  let reg=null,userAsked=false,reloading=false,remote=null;
-  function showBar(ver){
-    let later=null;try{later=sessionStorage.getItem('mm-update-later');}catch(e){}
-    $('updateText').textContent=`Moccasin Maker ${ver?'v'+ver+' ':''}is ready. Updating keeps your measurements, layout and designs.`;
-    if(later&&!userAsked)return;
-    bar.hidden=false;say('An update is ready.');
+  var LATER_KEY = 'moccasin-update-later-v2';
+  var BC_NAME = 'moccasin-update-v2';
+  var STORAGE_KEY = 'moccasin-maker';
+
+  // Snapshot of the saved state as this tab loaded it. applyUpdate
+  // uses it to tell this tab's own edits apart from another tab's:
+  // if storage now differs from both this snapshot and this tab's
+  // current state, another tab saved since this tab loaded and this
+  // tab's copy is stale. (Every S change in this app is persisted
+  // synchronously — through render() or directly — so at any idle
+  // moment storage equals this tab's S unless another tab wrote.)
+  var S_AT_LOAD = null;
+  try { S_AT_LOAD = JSON.stringify(S); } catch (e) {}
+
+  $('appVersion').textContent = APP_VERSION;
+  var status = $('updateStatus'), checkBtn = $('checkUpdates'), bar = $('updateBar');
+  var say = function(t){ status.textContent = t; };
+  if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return; // the claude.ai view updates itself
+  checkBtn.hidden = false;
+
+  var reg = null, userAsked = false, reloading = false, updating = false;
+  var remote = null, pendingRelease = null, checkPromise = null;
+  var tabId = 'tab-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  // Unsaved work in this tab: photo points (or a traced outline)
+  // placed on a loaded photo but not yet applied to the pattern.
+  // They live only in memory (PH); persist() saves S, not PH, and
+  // the only way to save them is Apply to pattern. A bare loaded
+  // photo with no points placed is NOT blocking: the reload loses
+  // only the preview and the photo can be picked again.
+  // This script shares the app script's scope, so persist, PH and
+  // S are directly reachable here — no bridge is needed.
+  function hasUnappliedPhotoWork(){
+    try {
+      return !!(PH && PH.img && (PH.pts.length || PH.trace.length));
+    } catch (e) { return true; }
   }
-  function waitingReady(w){if(w&&navigator.serviceWorker.controller)showBar(remote&&remote.version);}
-  function track(w){if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed')waitingReady(w);});}
-  async function fetchRemote(){try{const r=await fetch('version.json?t='+Date.now(),{cache:'no-store'});if(r.ok)remote=await r.json();}catch(e){}return remote;}
-  async function check(manual){
-    if(manual){userAsked=true;say('Checking…');checkBtn.disabled=true;}
-    try{
-      const info=await fetchRemote();
-      if(reg){await reg.update().catch(()=>{});}
-      if(reg&&reg.waiting&&navigator.serviceWorker.controller){showBar(info&&info.version);if(manual)say('An update is ready.');}
-      else if(info&&newer(info.version,APP_VERSION)){if(manual)say(`Version ${info.version} found. Downloading…`);}
-      else if(manual)say(info?`You have the latest version (${APP_VERSION}).`:'Could not reach the server. Try again when you are online.');
-    }finally{if(manual)checkBtn.disabled=false;}
+  function thisTabBlocked(){ return hasUnappliedPhotoWork(); }
+
+  // Multi-tab coordination over BroadcastChannel.
+  var bc = null, bcWaiters = {};
+  try { if ('BroadcastChannel' in window) bc = new BroadcastChannel(BC_NAME); } catch (e) {}
+  if (bc) bc.onmessage = function(ev){
+    var d = ev.data || {};
+    if (d.type === 'update-query' && d.from !== tabId) {
+      try { bc.postMessage({ type: 'update-response', id: d.id, from: tabId, blocked: thisTabBlocked() }); } catch (e) {}
+    } else if (d.type === 'update-response' && bcWaiters[d.id]) {
+      bcWaiters[d.id].push(d);
+    }
+  };
+  function queryTabs(release){
+    return new Promise(function(resolve){
+      if (!bc) return resolve([]);
+      var id = 'q-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      var answers = [];
+      bcWaiters[id] = answers;
+      try { bc.postMessage({ type: 'update-query', id: id, from: tabId, release: release }); } catch (e) {}
+      setTimeout(function(){ delete bcWaiters[id]; resolve(answers); }, 800);
+    });
   }
-  function applyUpdate(){
-    try{persist();}catch(e){}   // settings are already saved; this just makes sure the very latest edits are too
-    bar.hidden=true;say('Updating…');
-    const w=reg&&reg.waiting;
-    if(w){userAsked=true;w.postMessage({type:'SKIP_WAITING'});
-      setTimeout(()=>{if(!reloading){reloading=true;location.reload();}},4000); // safety net if controllerchange never fires
-    }else{reloading=true;location.reload();}
+
+  function workerVersion(worker, ms){
+    return new Promise(function(resolve){
+      if (!worker || !('MessageChannel' in window)) return resolve(null);
+      var done = false, timer = null;
+      try {
+        var ch = new MessageChannel();
+        timer = setTimeout(function(){ if (!done) { done = true; resolve(null); } }, ms);
+        ch.port1.onmessage = function(ev){
+          if (done) return; done = true; clearTimeout(timer);
+          var d = ev.data || {};
+          resolve((d.release && d.displayVersion) ? d : null);
+        };
+        worker.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+      } catch (e) { if (timer) clearTimeout(timer); resolve(null); }
+    });
   }
-  $('updateNow').onclick=applyUpdate;
-  $('updateLater').onclick=()=>{bar.hidden=true;try{sessionStorage.setItem('mm-update-later',(remote&&remote.version)||'?');}catch(e){}say('Update postponed. You will be asked again next time you open the app, or tap Check for updates.');};
-  checkBtn.onclick=()=>check(true);
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloading||!userAsked)return;reloading=true;location.reload();});
-  window.addEventListener('load',async()=>{
-    try{reg=await navigator.serviceWorker.register('sw.js',{updateViaCache:'none'});}catch(e){return;}
-    if(reg.waiting)waitingReady(reg.waiting);
+  function workerClientCount(worker){
+    return new Promise(function(resolve){
+      if (!worker || !('MessageChannel' in window)) return resolve(null);
+      var done = false, timer = null;
+      try {
+        var ch = new MessageChannel();
+        timer = setTimeout(function(){ if (!done) { done = true; resolve(null); } }, 2000);
+        ch.port1.onmessage = function(ev){
+          if (done) return; done = true; clearTimeout(timer);
+          var d = ev.data || {};
+          resolve(typeof d.count === 'number' ? d.count : null);
+        };
+        worker.postMessage({ type: 'GET_CLIENTS' }, [ch.port2]);
+      } catch (e) { if (timer) clearTimeout(timer); resolve(null); }
+    });
+  }
+  function waitControllerChange(ms){
+    return new Promise(function(resolve){
+      var done = false;
+      var timer = setTimeout(function(){ if (!done) { done = true; resolve(false); } }, ms);
+      var onChange = function(){
+        if (done) return; done = true; clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener('controllerchange', onChange);
+        resolve(true);
+      };
+      navigator.serviceWorker.addEventListener('controllerchange', onChange);
+    });
+  }
+
+  function showBar(display, release, manual){
+    if (release) pendingRelease = release;
+    var later = null;
+    try { later = sessionStorage.getItem(LATER_KEY); } catch (e) {}
+    $('updateText').textContent = 'Moccasin Maker ' + (display ? 'v' + display + ' ' : '') + 'is ready. Updating keeps your measurements, layout and designs.';
+    if (later && release && later === release && !manual) return;
+    bar.hidden = false;
+    say('An update is ready.');
+  }
+  function fetchRemote(){
+    return fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(info){ remote = (info && typeof info.release === 'string') ? info : null; return remote; })
+      .catch(function(){ remote = null; return null; });
+  }
+  function maybeShowUpdate(manual){
+    return fetchRemote().then(function(info){
+      if (reg) return reg.update().catch(function(){}).then(function(){ return info; });
+      return info;
+    }).then(function(info){
+      var w = reg && reg.waiting;
+      if (!w || !navigator.serviceWorker.controller) {
+        if (manual) {
+          if (!info) say('Could not reach the server. Try again when you are online.');
+          else if (info.release && info.release !== APP_RELEASE) say('Version ' + info.version + ' found. Downloading…');
+          else say('You have the latest version (' + APP_VERSION + ').');
+        }
+        return false;
+      }
+      return workerVersion(w, 2000).then(function(verified){
+        if (verified) {
+          if (info && info.release && verified.release !== info.release) {
+            if (manual) say('The downloaded update did not match the published release. Try again.');
+            return false;
+          }
+          showBar(verified.displayVersion, verified.release, manual);
+          if (manual) say('An update is ready.');
+          return true;
+        }
+        // Handshake failed: show the banner, but name no version.
+        showBar(null, info && info.release, manual);
+        if (manual) say('An update is ready.');
+        return true;
+      });
+    });
+  }
+  function check(manual){
+    if (checkPromise) return checkPromise;
+    if (manual) { say('Checking…'); checkBtn.disabled = true; }
+    checkPromise = maybeShowUpdate(manual).catch(function(){ return false; }).then(function(ok){
+      checkPromise = null;
+      if (manual) checkBtn.disabled = false;
+      return ok;
+    });
+    return checkPromise;
+  }
+  function track(w){
+    if (!w) return;
+    w.addEventListener('statechange', function(){
+      if (w.state === 'installed') check(false);
+    });
+  }
+
+  async function applyUpdate(){
+    if (updating) return;
+    updating = true;
+    try {
+      var w = reg && reg.waiting;
+      if (!w) { say('No update is waiting. Tap Check for updates first.'); return; }
+      var expected = pendingRelease || (remote && remote.release);
+      // 1. This tab must not be stale: if another tab saved newer
+      // measurements since this tab loaded, this tab's persist()
+      // would overwrite them. Fail closed in that case.
+      var stored = null, current = null;
+      try { stored = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+      try { current = JSON.stringify(S); } catch (e) {}
+      if (stored !== null && current !== null && S_AT_LOAD !== null
+          && stored !== current && stored !== S_AT_LOAD) {
+        say('Another Moccasin Maker tab saved newer measurements. Reload this tab before updating, or close the other tab.');
+        return;
+      }
+      // 2. Save this tab's measurements, layout and designs.
+      // persist() writes the whole state object S to localStorage
+      // synchronously, so by the time it returns the save is done.
+      try { persist(); } catch (e) {}
+      // 3. This tab: never update with photo points placed but not
+      // applied — they exist only in memory and the reload would
+      // lose them. There is no way to save them except Apply.
+      if (hasUnappliedPhotoWork()) {
+        say('You have photo points not yet applied — tap "Apply to pattern" or "Start over" first, then try again.');
+        return;
+      }
+      // 4. Coordinate with other tabs of this app.
+      say('Checking other tabs…');
+      var answers = await queryTabs(expected);
+      if (answers.some(function(a){ return a.blocked; })) {
+        say('Another Moccasin Maker tab has photo points not yet applied — apply or clear them there first, or close that tab.');
+        return;
+      }
+      if (answers.length === 0) {
+        var count = await workerClientCount(w);
+        if (count !== 1) {
+          say('Another Moccasin Maker tab is open and couldn’t confirm it’s safe.');
+          return;
+        }
+      }
+      // 5. Activate only the specific waiting worker.
+      say('Updating…');
+      userAsked = true;
+      bar.hidden = true;
+      var changed = waitControllerChange(8000);
+      w.postMessage({ type: 'SKIP_WAITING' });
+      var ok = await changed;
+      if (!ok) {
+        userAsked = false;
+        say('The update did not start. Tap Update now to try again, or Later to defer it.');
+        return;
+      }
+      // 6. Verify the new controller really is the expected release,
+      // then reload exactly once. No blind reload fallback exists.
+      var info = await workerVersion(navigator.serviceWorker.controller, 2000);
+      if (!info || (expected && info.release !== expected)) {
+        userAsked = false;
+        say('The update did not take over as expected. Tap Update now to try again, or Later to defer it.');
+        return;
+      }
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    } finally { updating = false; }
+  }
+
+  $('updateNow').onclick = applyUpdate;
+  $('updateLater').onclick = function(){
+    bar.hidden = true;
+    try { sessionStorage.setItem(LATER_KEY, pendingRelease || (remote && remote.release) || '?'); } catch (e) {}
+    say('Update postponed. You will be asked again next time you open the app, or tap Check for updates.');
+  };
+  checkBtn.onclick = function(){ check(true); };
+  // A controllerchange on its own (first install, or an update
+  // activated from another tab) never reloads this page: only an
+  // explicit Update now in this tab does, after verification in
+  // applyUpdate. There is deliberately no reload here.
+  window.addEventListener('load', async function(){
+    try { reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none', scope: './' }); } catch (e) { return; }
+    if (reg.waiting) check(false);
     track(reg.installing);
-    reg.addEventListener('updatefound',()=>track(reg.installing));
+    reg.addEventListener('updatefound', function(){ track(reg.installing); });
     check(false);
   });
   // iOS and Android resume installed apps instead of relaunching them, so check when the app comes back.
-  let last=Date.now();
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-last>5*60e3){last=Date.now();check(false);}});
-  setInterval(()=>{if(document.visibilityState==='visible'){last=Date.now();check(false);}},60*60e3);
+  var last = Date.now();
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible' && Date.now() - last > 5 * 60e3) { last = Date.now(); check(false); }
+  });
+  setInterval(function(){
+    if (document.visibilityState === 'visible') { last = Date.now(); check(false); }
+  }, 60 * 60e3);
 })();
 
 /* ---------- install as an app (PWA) ---------- */

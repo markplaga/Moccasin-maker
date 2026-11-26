@@ -1,1 +1,1 @@
-{ "version": "1.8.1", "date": "2026-11-26", "notes": "Mark the update system with PWA-UPDATE-SYSTEM v1." }
+{"date":"2026-11-26","notes":"Migrate to PWA-UPDATE-SYSTEM v2.","release":"1.8.2-20261126-1","version":"1.8.2"}
