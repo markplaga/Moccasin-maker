@@ -13,7 +13,7 @@ A single web page for designing and making a soft-sole, puckered-toe ankle-boot 
    - **Cuff**: a curved band cut as a flattened cone so it follows the leg.
    - **Outsole** (optional).
    The pieces include numbered gather notches, punch-hole marks and grain arrows. The page reports the gather ratio and other fit checks.
-5. **Print.** Download a tiled PDF for Letter or A4 with a cover page, test squares and a tile map, or download a full-size SVG for a plotter or a copy shop.
+5. **Print.** Download a tiled PDF for Letter, Legal, Tabloid or A4 with a cover page, test squares and a tile map, or download a full-size SVG for a plotter or a copy shop.
 6. **Instructions.** Step-by-step making directions that use your numbers, such as hole spacing, stitch counts, lace length and leather area.
 
 ## How the geometry works
